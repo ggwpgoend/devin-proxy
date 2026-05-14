@@ -7,10 +7,12 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/ggwpgoend/devin-proxy/internal/checker"
 	"github.com/ggwpgoend/devin-proxy/internal/keypool"
 )
 
@@ -69,6 +71,8 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/stats", s.handleAPIStats)
 	r.Get("/api/keys", s.handleAPIKeys)
 	r.Get("/api/logs", s.handleAPILogs)
+	r.Post("/keys/{id}/check", s.handleCheckKey)
+	r.Post("/keys/check-all", s.handleCheckAll)
 
 	return r
 }
@@ -181,6 +185,79 @@ func (s *Server) handleAPILogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, logs)
+}
+
+func (s *Server) handleCheckKey(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx := r.Context()
+
+	apiKey, err := s.pool.DecryptKeyByID(ctx, id)
+	if err != nil {
+		jsonErr(w, err)
+		return
+	}
+
+	result := checker.Check(ctx, apiKey)
+	log.Printf("[checker] key %s: %s (HTTP %d, %dms)", id[:8], result.Status, result.HTTPStatus, result.Latency)
+
+	switch result.Status {
+	case checker.StatusValid:
+		_ = s.pool.UpdateKeyState(ctx, id, "active", "")
+	case checker.StatusUnauthorized:
+		_ = s.pool.UpdateKeyState(ctx, id, "revoked", result.Error)
+	case checker.StatusQuotaExhausted:
+		_ = s.pool.UpdateKeyState(ctx, id, "cooldown", result.Error)
+	case checker.StatusRateLimited:
+		_ = s.pool.UpdateKeyState(ctx, id, "cooldown", result.Error)
+	}
+
+	jsonOK(w, result)
+}
+
+func (s *Server) handleCheckAll(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	keys, err := s.pool.ListKeys(ctx)
+	if err != nil {
+		jsonErr(w, err)
+		return
+	}
+
+	type keyResult struct {
+		ID     string         `json:"id"`
+		Label  string         `json:"label"`
+		Result checker.Result `json:"result"`
+	}
+
+	results := make([]keyResult, len(keys))
+	var wg sync.WaitGroup
+	for i, k := range keys {
+		wg.Add(1)
+		go func(idx int, key keypool.Key) {
+			defer wg.Done()
+			apiKey, err := s.pool.DecryptKeyByID(ctx, key.ID)
+			if err != nil {
+				results[idx] = keyResult{ID: key.ID, Label: key.Label, Result: checker.Result{Status: checker.StatusNetworkError, Error: err.Error()}}
+				return
+			}
+			res := checker.Check(ctx, apiKey)
+			results[idx] = keyResult{ID: key.ID, Label: key.Label, Result: res}
+
+			switch res.Status {
+			case checker.StatusValid:
+				_ = s.pool.UpdateKeyState(ctx, key.ID, "active", "")
+			case checker.StatusUnauthorized:
+				_ = s.pool.UpdateKeyState(ctx, key.ID, "revoked", res.Error)
+			case checker.StatusQuotaExhausted:
+				_ = s.pool.UpdateKeyState(ctx, key.ID, "cooldown", res.Error)
+			case checker.StatusRateLimited:
+				_ = s.pool.UpdateKeyState(ctx, key.ID, "cooldown", res.Error)
+			}
+		}(i, k)
+	}
+	wg.Wait()
+
+	log.Printf("[checker] checked %d keys", len(results))
+	jsonOK(w, results)
 }
 
 func jsonOK(w http.ResponseWriter, v any) {

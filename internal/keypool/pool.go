@@ -246,6 +246,28 @@ func (p *Pool) RecentRequests(ctx context.Context, limit int) ([]RecentRequest, 
 	return reqs, rows.Err()
 }
 
+func (p *Pool) DecryptKeyByID(ctx context.Context, id string) (string, error) {
+	var enc string
+	err := p.db.QueryRowContext(ctx, `SELECT api_key_enc FROM keys WHERE id = ?`, id).Scan(&enc)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("keypool: get enc: %w", err)
+	}
+	plain, err := p.cipher.DecryptString(enc)
+	if err != nil {
+		return "", fmt.Errorf("keypool: decrypt: %w", err)
+	}
+	return plain, nil
+}
+
+func (p *Pool) UpdateKeyState(ctx context.Context, id, state, lastError string) error {
+	now := time.Now().UTC()
+	_, err := p.db.ExecContext(ctx, `UPDATE keys SET state = ?, last_error = ?, updated_at = ? WHERE id = ?`, state, lastError, now, id)
+	return err
+}
+
 func (p *Pool) ReactivateExpiredCooldowns(ctx context.Context) (int64, error) {
 	now := time.Now().UTC()
 	res, err := p.db.ExecContext(ctx, `UPDATE keys SET state = 'active', cooldown_until = NULL, updated_at = ? WHERE state = 'cooldown' AND cooldown_until IS NOT NULL AND cooldown_until <= ?`, now, now)

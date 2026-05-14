@@ -50,12 +50,49 @@ GOOS=windows GOARCH=amd64 go build -o devin-proxy.exe ./cmd/devin-proxy
 make windows
 ```
 
+## Пошаговая инструкция для Windows 10
+
+1. **Скачай** `devin-proxy.exe` (ссылка ниже или собери сам)
+2. **Положи** `.exe` в отдельную папку, например `C:\devin-proxy\`
+3. **Запусти** через cmd/PowerShell:
+   ```powershell
+   cd C:\devin-proxy
+   .\devin-proxy.exe
+   ```
+4. **Открой** админ-панель: [http://localhost:9091](http://localhost:9091)
+5. **Добавь ключи** — вставь свои API-ключи через форму "Add Single Key" или "Bulk Import"
+6. **Проверь ключи** — нажми "🔍 Check All Keys" для проверки валидности всех ключей
+7. **Используй прокси** — вместо `https://api.devin.ai` используй `http://localhost:9090`
+
+### Настройка как клиент Devin
+
+В настройках Devin Key Manager (или любого другого клиента) укажи:
+- **API URL:** `http://localhost:9090`
+- **Авторизация:** не нужна — прокси сам подставит ключ из пула
+
+### Пример запроса (PowerShell)
+
+```powershell
+# Без ключа — прокси подставит автоматически:
+Invoke-RestMethod -Uri "http://localhost:9090/v1/sessions?limit=1"
+
+# Или через curl:
+curl http://localhost:9090/v1/sessions?limit=1
+```
+
+### Если Windows Firewall блокирует
+
+При первом запуске Windows может спросить разрешение на сетевой доступ — нажми "Разрешить". Если заблокировал случайно:
+1. Панель управления → Брандмауэр Windows → Дополнительные параметры
+2. Правила для входящих → Новое правило → Программа → Укажи путь к `devin-proxy.exe`
+
 ## Usage
 
 1. Start the proxy: `./devin-proxy`
 2. Open admin panel: `http://localhost:9091`
 3. Add your API keys (single or bulk import)
-4. Point your client to `http://localhost:9090` instead of `https://api.devin.ai`
+4. **Check keys** — click "🔍 Check All Keys" to validate all keys against Devin API
+5. Point your client to `http://localhost:9090` instead of `https://api.devin.ai`
 
 ### Example with curl
 
@@ -82,9 +119,10 @@ curl http://localhost:9090/v1/sessions
 - **Dashboard** with KPI cards (total/active/cooldown/revoked keys, request stats)
 - **Add single key** with label and plan type
 - **Bulk import** — paste multiple keys (one per line or comma-separated)
+- **Key checker** — validate single key or all keys against Devin API (`Check` / `Check All`)
 - **Enable/disable/delete** keys
 - **Request log** — last 50 proxied requests with status, latency, errors
-- **Auto-refresh** every 10 seconds
+- **Auto-refresh** every 15 seconds (pauses while editing forms)
 
 ## Architecture
 
@@ -94,8 +132,9 @@ internal/
   crypto/crypto.go         — AES-256-GCM encryption for keys at rest
   store/store.go           — SQLite with embedded migrations
   keypool/pool.go          — key pool: CRUD, round-robin pick, cooldown, stats
+  checker/checker.go       — API key validation against Devin API
   proxy/proxy.go           — HTTP reverse proxy with retry & rotation
-  admin/admin.go           — admin dashboard routes (chi)
+  admin/admin.go           — admin dashboard routes + checker endpoints (chi)
   admin/templates.go       — embedded HTML/CSS dashboard
 ```
 

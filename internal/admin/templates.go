@@ -46,6 +46,14 @@ button:hover,.btn:hover{opacity:.9}
 .btn-danger{background:var(--red)}
 .btn-secondary{background:var(--border);color:var(--text)}
 .btn-sm{padding:3px 8px;font-size:11px}
+.btn-check{background:var(--purple)}
+.btn-check-all{background:var(--purple);display:inline-flex;align-items:center;gap:4px}
+.check-result{font-size:11px;padding:2px 6px;border-radius:4px;margin-left:4px}
+.check-valid{background:rgba(63,185,80,.15);color:var(--green)}
+.check-invalid{background:rgba(248,81,73,.15);color:var(--red)}
+.check-warning{background:rgba(210,153,34,.15);color:var(--orange)}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--text2);border-top:2px solid var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 /* Table */
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -184,6 +192,10 @@ tr:hover{background:rgba(88,166,255,.04)}
     </form>
   </div>
 
+  <div style="padding:8px 16px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--border)">
+    <button class="btn-sm btn-check-all" onclick="checkAllKeys(this)">🔍 Check All Keys</button>
+    <span id="check-all-status" style="font-size:12px;color:var(--text2)"></span>
+  </div>
   <table>
     <thead>
       <tr>
@@ -208,6 +220,7 @@ tr:hover{background:rgba(88,166,255,.04)}
         <td class="red">{{.FailCount}}</td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.LastError}}">{{truncate .LastError 40}}</td>
         <td class="actions">
+          <button class="btn-sm btn-check" onclick="checkKey('{{.ID}}', this)">Check</button>
           {{if eq .State "active"}}
             <form method="POST" action="/keys/{{.ID}}/disable" style="display:inline"><button class="btn-sm btn-secondary">Disable</button></form>
           {{else if eq .State "disabled"}}
@@ -271,6 +284,46 @@ function switchTab(el, id) {
 function deleteKey(id) {
   if (!confirm('Delete this key?')) return;
   fetch('/keys/' + id, {method: 'DELETE'}).then(() => location.reload());
+}
+function checkKey(id, btn) {
+  const orig = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled = true;
+  fetch('/keys/' + id + '/check', {method: 'POST'})
+    .then(r => r.json())
+    .then(res => {
+      let cls = 'check-warning', txt = res.status;
+      if (res.status === 'valid') { cls = 'check-valid'; txt = '✓ Valid'; }
+      else if (res.status === 'unauthorized') { cls = 'check-invalid'; txt = '✗ Invalid'; }
+      else if (res.status === 'quota_exhausted') { cls = 'check-warning'; txt = '⚠ Quota'; }
+      else if (res.status === 'rate_limited') { cls = 'check-warning'; txt = '⚠ Rate limited'; }
+      btn.outerHTML = '<span class="check-result ' + cls + '">' + txt + ' (' + res.latency_ms + 'ms)</span>';
+      setTimeout(() => location.reload(), 2000);
+    })
+    .catch(() => { btn.textContent = orig; btn.disabled = false; });
+}
+function checkAllKeys(btn) {
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span> Checking...';
+  btn.disabled = true;
+  const status = document.getElementById('check-all-status');
+  fetch('/keys/check-all', {method: 'POST'})
+    .then(r => r.json())
+    .then(results => {
+      let valid = 0, invalid = 0, other = 0;
+      results.forEach(r => {
+        if (r.result.status === 'valid') valid++;
+        else if (r.result.status === 'unauthorized') invalid++;
+        else other++;
+      });
+      status.innerHTML = '<span class="check-valid">✓ ' + valid + ' valid</span> '
+        + '<span class="check-invalid">✗ ' + invalid + ' invalid</span> '
+        + '<span class="check-warning">⚠ ' + other + ' other</span>';
+      btn.innerHTML = orig;
+      btn.disabled = false;
+      setTimeout(() => location.reload(), 3000);
+    })
+    .catch(() => { btn.innerHTML = orig; btn.disabled = false; });
 }
 // Auto-refresh every 15s, but only if no input is focused
 let refreshTimer;
