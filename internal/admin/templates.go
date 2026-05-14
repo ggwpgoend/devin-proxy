@@ -272,8 +272,19 @@ function deleteKey(id) {
   if (!confirm('Delete this key?')) return;
   fetch('/keys/' + id, {method: 'DELETE'}).then(() => location.reload());
 }
-// Auto-refresh every 10s
-setTimeout(() => location.reload(), 10000);
+// Auto-refresh every 15s, but only if no input is focused
+let refreshTimer;
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
+      scheduleRefresh();
+      return;
+    }
+    location.reload();
+  }, 15000);
+}
+scheduleRefresh();
 </script>
 </body>
 </html>{{end}}`
