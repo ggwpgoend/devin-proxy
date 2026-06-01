@@ -1,0 +1,6 @@
+/devin-proxy
+/devin-proxy.exe
+*.db
+*.db-shm
+*.db-wal
+.master_key
